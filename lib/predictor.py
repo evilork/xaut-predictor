@@ -27,20 +27,18 @@ class XAUTPredictor:
         intercept = (sy - slope * sx) / n
         return slope, intercept
 
-    def weighted_moving_predict(self, prices, weights=None):
+    def weighted_moving_predict(self, prices):
         n = min(len(prices), 10)
         recent = prices[-n:]
-        if weights is None:
-            weights = list(range(1, n + 1))
-        total_w = sum(weights[-n:])
-        return sum(p * w for p, w in zip(recent, weights[-n:])) / total_w
+        weights = list(range(1, n + 1))
+        total_w = sum(weights)
+        return sum(p * w for p, w in zip(recent, weights)) / total_w
 
     def ema_predict(self, prices):
         ema5 = Indicators.ema(prices, 5)
         ema10 = Indicators.ema(prices, 10)
-        last_price = prices[-1]
         trend = ema5[-1] - ema10[-1]
-        return last_price + trend
+        return prices[-1] + trend
 
     def regression_predict(self, prices):
         n = min(len(prices), 20)
@@ -66,8 +64,7 @@ class XAUTPredictor:
         n = min(len(prices), 20)
         recent = prices[-n:]
         mean = sum(recent) / len(recent)
-        last = prices[-1]
-        return last + (mean - last) * 0.15
+        return prices[-1] + (mean - prices[-1]) * 0.15
 
     def ensemble_predict(self, prices):
         predictions = {
@@ -105,7 +102,6 @@ class XAUTPredictor:
             subset = prices[:i]
             actual = prices[i]
             preds = self.ensemble_predict(subset)
-
             for name in errors:
                 if name in preds:
                     errors[name].append(abs(preds[name] - actual))
@@ -115,32 +111,56 @@ class XAUTPredictor:
             if errs:
                 mae = sum(errs) / len(errs)
                 metrics[name] = {"mae": round(mae, 2)}
-
         return metrics
 
     def run(self):
+        # Пробуем 3 способа получить данные
         data = self.fetcher.get_xaut_ohlc(days=90)
 
-        if data is None or len(data) < 30:
+        if not data or len(data) < 30:
+            data = self.fetcher.get_xaut_ohlc(days=30)
+
+        if not data or len(data) < 10:
             data = self.fetcher.get_xaut_history(days=90)
 
-        if data is None or len(data) < 30:
-            return {"error": "Недостаточно данных. Попробуйте позже."}
+        if not data or len(data) < 10:
+            data = self.fetcher.get_xaut_history(days=30)
+
+        if not data or len(data) < 10:
+            data = self.fetcher.get_gold_fallback()
+
+        if not data or len(data) < 10:
+            # Последний fallback — текущая цена
+            current = self.fetcher.get_current_price()
+            if current and current["price"] > 0:
+                return {
+                    "current_price": current["price"],
+                    "current_market": current,
+                    "predictions": {},
+                    "ensemble": current["price"],
+                    "change_pct": 0,
+                    "direction": "⏳ НЕДОСТАТОЧНО ДАННЫХ",
+                    "support": 0,
+                    "resistance": 0,
+                    "indicators": {},
+                    "signals": {"INFO": {"signal": "NEUTRAL", "reason": "API временно недоступен, попробуйте позже"}},
+                    "metrics": {},
+                    "fear_greed": self.fetcher.get_fear_greed(),
+                    "data_points": 0,
+                    "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+                }
+            return {"error": "API CoinGecko временно недоступен. Попробуйте через 1-2 минуты."}
 
         closes = [d["close"] for d in data]
 
-        # Прогнозы
         predictions = self.ensemble_predict(closes)
         ensemble = predictions["ensemble"]
 
-        # Точность
         metrics = self.calculate_accuracy(closes)
 
-        # Текущая цена
         current = self.fetcher.get_current_price()
         current_price = current["price"] if current else closes[-1]
 
-        # Изменение
         change = 0
         if current_price > 0:
             change = round(((ensemble - current_price) / current_price) * 100, 4)
@@ -152,15 +172,12 @@ class XAUTPredictor:
         else:
             direction = "➡️ БОКОВИК"
 
-        # Уровни
-        recent_30 = closes[-30:]
+        recent_30 = closes[-min(30, len(closes)):]
         support = round(min(recent_30), 2)
         resistance = round(max(recent_30), 2)
 
-        # Индикаторы и сигналы
         indicators_data, signals = Indicators.analyze(data)
 
-        # Fear & Greed
         fg = self.fetcher.get_fear_greed()
 
         return {
