@@ -74,7 +74,6 @@ class XAUTPredictor:
             "momentum": self.momentum_predict(prices),
             "mean_reversion": self.mean_reversion_predict(prices),
         }
-
         weights = {
             "weighted_ma": 0.20,
             "ema_trend": 0.25,
@@ -82,22 +81,17 @@ class XAUTPredictor:
             "momentum": 0.20,
             "mean_reversion": 0.10,
         }
-
         ensemble = sum(predictions[k] * weights[k] for k in predictions)
         predictions["ensemble"] = round(ensemble, 2)
-
         for k in predictions:
             predictions[k] = round(predictions[k], 2)
-
         return predictions
 
     def calculate_accuracy(self, prices):
         if len(prices) < 30:
             return {}
-
         errors = {"weighted_ma": [], "ema_trend": [], "linear_regression": [],
                   "momentum": [], "mean_reversion": [], "ensemble": []}
-
         for i in range(20, len(prices) - 1):
             subset = prices[:i]
             actual = prices[i]
@@ -105,7 +99,6 @@ class XAUTPredictor:
             for name in errors:
                 if name in preds:
                     errors[name].append(abs(preds[name] - actual))
-
         metrics = {}
         for name, errs in errors.items():
             if errs:
@@ -114,48 +107,15 @@ class XAUTPredictor:
         return metrics
 
     def run(self):
-        # Пробуем 3 способа получить данные
-        data = self.fetcher.get_xaut_ohlc(days=90)
-
-        if not data or len(data) < 30:
-            data = self.fetcher.get_xaut_ohlc(days=30)
+        data, source = self.fetcher.get_data()
 
         if not data or len(data) < 10:
-            data = self.fetcher.get_xaut_history(days=90)
-
-        if not data or len(data) < 10:
-            data = self.fetcher.get_xaut_history(days=30)
-
-        if not data or len(data) < 10:
-            data = self.fetcher.get_gold_fallback()
-
-        if not data or len(data) < 10:
-            # Последний fallback — текущая цена
-            current = self.fetcher.get_current_price()
-            if current and current["price"] > 0:
-                return {
-                    "current_price": current["price"],
-                    "current_market": current,
-                    "predictions": {},
-                    "ensemble": current["price"],
-                    "change_pct": 0,
-                    "direction": "⏳ НЕДОСТАТОЧНО ДАННЫХ",
-                    "support": 0,
-                    "resistance": 0,
-                    "indicators": {},
-                    "signals": {"INFO": {"signal": "NEUTRAL", "reason": "API временно недоступен, попробуйте позже"}},
-                    "metrics": {},
-                    "fear_greed": self.fetcher.get_fear_greed(),
-                    "data_points": 0,
-                    "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-                }
-            return {"error": "API CoinGecko временно недоступен. Попробуйте через 1-2 минуты."}
+            return {"error": "Все API временно недоступны. Попробуйте через 2 минуты."}
 
         closes = [d["close"] for d in data]
 
         predictions = self.ensemble_predict(closes)
         ensemble = predictions["ensemble"]
-
         metrics = self.calculate_accuracy(closes)
 
         current = self.fetcher.get_current_price()
@@ -172,9 +132,9 @@ class XAUTPredictor:
         else:
             direction = "➡️ БОКОВИК"
 
-        recent_30 = closes[-min(30, len(closes)):]
-        support = round(min(recent_30), 2)
-        resistance = round(max(recent_30), 2)
+        recent = closes[-min(30, len(closes)):]
+        support = round(min(recent), 2)
+        resistance = round(max(recent), 2)
 
         indicators_data, signals = Indicators.analyze(data)
 
@@ -194,5 +154,6 @@ class XAUTPredictor:
             "metrics": metrics,
             "fear_greed": fg,
             "data_points": len(data),
+            "data_source": source,
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
         }
