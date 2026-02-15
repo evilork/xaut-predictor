@@ -10,16 +10,39 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e
 .c{max-width:880px;margin:0 auto;padding:16px}
 h1{text-align:center;font-size:2em;margin:20px 0;background:linear-gradient(135deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .card{background:#1a1a2e;border-radius:16px;padding:24px;margin:14px 0;border:1px solid #2a2a4a}
-.card h2{color:#ffd700;margin-bottom:14px}
+.card h2{color:#ffd700;margin-bottom:14px;font-size:1.2em}
 .pb{font-size:2.8em;font-weight:bold;text-align:center;color:#fff}
 .ch24{text-align:center;margin-top:6px;font-size:1.1em}
-.pbox{text-align:center;padding:20px;border-radius:12px;margin:10px 0}
-.pbox.up{background:rgba(0,200,83,.12);border:1px solid #00c853}
-.pbox.dn{background:rgba(255,23,68,.12);border:1px solid #ff1744}
-.pbox.sd{background:rgba(255,215,0,.12);border:1px solid #ffd700}
-.pp{font-size:2.4em;font-weight:bold}
-.up .pp{color:#00e676}.dn .pp{color:#ff5252}.sd .pp{color:#ffd700}
-.pc{font-size:1.15em;margin-top:6px}
+
+.forecast-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.forecast-item{padding:16px;border-radius:12px;text-align:center}
+.forecast-item.up{background:rgba(0,200,83,.1);border:1px solid rgba(0,200,83,.3)}
+.forecast-item.dn{background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.3)}
+.forecast-item.sd{background:rgba(255,215,0,.1);border:1px solid rgba(255,215,0,.3)}
+.forecast-period{font-size:.85em;color:#aaa;margin-bottom:4px}
+.forecast-dir{font-size:1em;margin-bottom:4px}
+.forecast-price{font-size:1.6em;font-weight:bold}
+.up .forecast-price{color:#00e676}
+.dn .forecast-price{color:#ff5252}
+.sd .forecast-price{color:#ffd700}
+.forecast-change{font-size:.95em;margin-top:4px}
+
+.main-pred{text-align:center;padding:24px;border-radius:12px;margin:10px 0}
+.main-pred.up{background:rgba(0,200,83,.12);border:1px solid #00c853}
+.main-pred.dn{background:rgba(255,23,68,.12);border:1px solid #ff1744}
+.main-pred.sd{background:rgba(255,215,0,.12);border:1px solid #ffd700}
+.main-pred .dir{font-size:1.3em;margin-bottom:4px}
+.main-pred .period{font-size:.9em;color:#aaa}
+.main-pred .price{font-size:2.4em;font-weight:bold;margin:8px 0}
+.up .price{color:#00e676}.dn .price{color:#ff5252}.sd .price{color:#ffd700}
+.main-pred .change{font-size:1.15em}
+
+.path-bar{display:flex;justify-content:space-between;align-items:flex-end;height:120px;padding:10px 0;margin-top:10px}
+.path-col{display:flex;flex-direction:column;align-items:center;flex:1}
+.path-dot{width:8px;height:8px;border-radius:50%;margin-bottom:4px}
+.path-price{font-size:.7em;color:#aaa}
+.path-day{font-size:.7em;color:#666;margin-top:4px}
+
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .met{text-align:center;padding:14px}
 .mv{font-size:1.5em;font-weight:bold;color:#fff}
@@ -37,7 +60,10 @@ h1{text-align:center;font-size:2em;margin:20px 0;background:linear-gradient(135d
 .sp{display:inline-block;width:40px;height:40px;border:4px solid #333;border-top-color:#ffd700;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:16px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .ts{text-align:center;color:#555;font-size:.82em;margin:8px 0}
-@media(max-width:600px){.grid{grid-template-columns:1fr}.pb{font-size:2em}.pp{font-size:1.7em}}
+.src{text-align:center;color:#444;font-size:.75em}
+.acc-bar{background:#333;border-radius:4px;height:8px;margin-top:6px;overflow:hidden}
+.acc-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#ff1744,#ffd700,#00e676)}
+@media(max-width:600px){.forecast-grid{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.pb{font-size:2em}.main-pred .price{font-size:1.8em}}
 </style>
 </head>
 <body>
@@ -49,61 +75,118 @@ h1{text-align:center;font-size:2em;margin:20px 0;background:linear-gradient(135d
 <script>
 async function load(){
 const b=document.getElementById('rb'),c=document.getElementById('ct');
-b.disabled=true;b.textContent='⏳ Загрузка (до 30 сек)...';
+b.disabled=true;b.textContent='⏳ Загрузка...';
 c.innerHTML='<div class="ld"><div class="sp"></div><div>Анализ рынка...</div></div>';
 try{
-const r=await fetch('/api/predict');
-const t=await r.text();
-let d;
-try{d=JSON.parse(t)}catch(pe){c.innerHTML='<div class="card"><h2>❌ Ошибка</h2><p>Некорректный ответ сервера. Попробуйте через минуту.</p><pre style="color:#666;font-size:.7em;margin-top:8px;overflow:auto">'+t.substring(0,500)+'</pre></div>';return}
-if(d.error){c.innerHTML='<div class="card"><h2>⚠️ Временная проблема</h2><p>'+d.error+'</p><p style="color:#666;margin-top:8px">Нажмите "Обновить" через 1-2 минуты</p></div>';return}
+const r=await fetch('/api/predict');const t=await r.text();
+let d;try{d=JSON.parse(t)}catch(e){c.innerHTML='<div class="card"><h2>❌</h2><p>Ошибка парсинга</p></div>';return}
+if(d.error){c.innerHTML='<div class="card"><h2>⚠️</h2><p>'+d.error+'</p></div>';return}
 render(d)
-}catch(e){c.innerHTML='<div class="card"><h2>❌ Ошибка сети</h2><p>'+e.message+'</p><p style="color:#666;margin-top:8px">Проверьте интернет и попробуйте снова</p></div>'}
+}catch(e){c.innerHTML='<div class="card"><h2>❌</h2><p>'+e.message+'</p></div>'}
 finally{b.disabled=false;b.textContent='🔄 Обновить прогноз'}}
 
-function render(d){
-const ch=d.change_pct||0,cls=ch>.3?'up':ch<-.3?'dn':'sd';
-const cc=ch>0?'#00e676':ch<0?'#ff5252':'#ffd700';
-const c24=d.current_market?.change_24h||0,c24c=c24>0?'#00e676':'#ff5252';
+function cls(ch){return ch>.3?'up':ch<-.3?'dn':'sd'}
+function clr(ch){return ch>0?'#00e676':ch<0?'#ff5252':'#ffd700'}
 
+function render(d){
+const mc=d.main_change_pct||0;
+const c24=d.current_market?.change_24h||0;
+
+// Forecasts
+let fc='';
+if(d.forecasts){
+for(const[k,f]of Object.entries(d.forecasts)){
+const cl=cls(f.change_pct);
+fc+=`<div class="forecast-item ${cl}">
+<div class="forecast-period">⏱ ${f.label}</div>
+<div class="forecast-dir">${f.direction}</div>
+<div class="forecast-price">$${f.price.toFixed(2)}</div>
+<div class="forecast-change" style="color:${clr(f.change_pct)}">${f.change_pct>0?'+':''}${f.change_pct.toFixed(4)}%</div>
+</div>`}}
+
+// Price path
+let pp='';
+if(d.price_path&&d.price_path.length){
+const prices=d.price_path.map(p=>p.price);
+const mn=Math.min(...prices)*0.999;
+const mx=Math.max(...prices)*1.001;
+const range=mx-mn||1;
+pp='<div class="path-bar">';
+for(const p of d.price_path){
+const h=Math.max(10,((p.price-mn)/range)*100);
+const c=p.price>=d.current_price?'#00e676':'#ff5252';
+pp+=`<div class="path-col">
+<div class="path-price">$${p.price.toFixed(0)}</div>
+<div style="width:16px;background:${c};border-radius:4px;height:${h}px;min-height:10px"></div>
+<div class="path-day">День ${p.day}</div>
+</div>`}
+pp+='</div>'}
+
+// Signals
 let sg='';
 if(d.signals){for(const[n,s]of Object.entries(d.signals)){
 const v=s.value!==undefined?' ('+s.value+')':'';
-sg+='<div class="sr"><span>'+n+'</span><div><span class="badge badge-'+s.signal+'">'+s.signal+'</span><span class="rsn">'+s.reason+v+'</span></div></div>'}}
+sg+=`<div class="sr"><span>${n}</span><div><span class="badge badge-${s.signal}">${s.signal}</span><span class="rsn">${s.reason}${v}</span></div></div>`}}
 
-let md='';
-if(d.predictions){for(const[n,p]of Object.entries(d.predictions)){
-if(n!=='ensemble')md+='<div class="met"><div class="mv">$'+p.toFixed(2)+'</div><div class="ml">'+n+'</div></div>'}}
-
+// Fear greed
 let fg='';
-if(d.fear_greed&&d.fear_greed.length){fg='<div class="card"><h2>😱 Fear & Greed Index</h2>';
-for(const f of d.fear_greed){const fc=f.value>50?'#00e676':'#ff5252';
-fg+='<div class="sr"><span>'+f.date+'</span><span style="color:'+fc+';font-weight:bold">'+f.value+' — '+f.label+'</span></div>'}fg+='</div>'}
+if(d.fear_greed&&d.fear_greed.length){fg='<div class="card"><h2>😱 Fear & Greed Index (крипторынок)</h2>';
+for(const f of d.fear_greed){const fc2=f.value>50?'#00e676':'#ff5252';
+fg+=`<div class="sr"><span>${f.date}</span><span style="color:${fc2};font-weight:bold">${f.value} — ${f.label}</span></div>`}
+fg+='</div>'}
 
+// Accuracy
 let mt='';
-if(d.metrics&&Object.keys(d.metrics).length){mt='<div class="card"><h2>📏 Точность моделей (MAE)</h2>';
-for(const[n,m]of Object.entries(d.metrics))mt+='<div class="sr"><span>'+n+'</span><span style="color:#aaa">$'+m.mae+'</span></div>';mt+='</div>'}
+if(d.metrics&&d.metrics.ensemble){
+const m=d.metrics.ensemble;
+mt=`<div class="card"><h2>📏 Точность модели</h2>
+<div class="sr"><span>Средняя ошибка (MAE)</span><span style="color:#fff">$${m.mae}</span></div>
+<div class="sr"><span>MAPE</span><span style="color:#fff">${m.mape}%</span></div>
+<div class="sr"><span>Точность</span><span style="color:#00e676;font-weight:bold">${m.accuracy}%</span></div>
+<div class="acc-bar"><div class="acc-fill" style="width:${m.accuracy}%"></div></div>
+</div>`}
 
-c=document.getElementById('ct');
-c.innerHTML=
-'<p class="ts">Обновлено: '+d.timestamp+' | Данных: '+d.data_points+' точек</p>'+
-'<div class="card"><h2>💰 Текущая цена XAUT</h2><div class="pb">$'+(d.current_price||0).toFixed(2)+'</div>'+
-'<div class="ch24" style="color:'+c24c+'">24ч: '+(c24>0?'+':'')+c24.toFixed(2)+'%</div></div>'+
+document.getElementById('ct').innerHTML=`
+<p class="ts">Обновлено: ${d.timestamp}</p>
+<p class="src">Источник: ${d.data_source||'API'} | ${d.data_points} точек</p>
 
-'<div class="card"><h2>🔮 Прогноз (следующий период)</h2><div class="pbox '+cls+'">'+
-'<div style="font-size:1.2em">'+d.direction+'</div>'+
-'<div class="pp">$'+(d.ensemble||0).toFixed(2)+'</div>'+
-'<div class="pc" style="color:'+cc+'">'+(ch>0?'+':'')+ch.toFixed(4)+'%</div></div></div>'+
+<div class="card">
+<h2>💰 Текущая цена XAUT</h2>
+<div class="pb">$${(d.current_price||0).toFixed(2)}</div>
+<div class="ch24" style="color:${clr(c24)}">24ч: ${c24>0?'+':''}${c24.toFixed(2)}%</div>
+</div>
 
-'<div class="card"><h2>🤖 Модели</h2><div class="grid">'+md+'</div></div>'+
+<div class="card">
+<h2>🔮 Основной прогноз (${d.main_period||'1 день'})</h2>
+<div class="main-pred ${cls(mc)}">
+<div class="dir">${d.main_direction}</div>
+<div class="period">Через ${d.main_period||'1 день'}</div>
+<div class="price">$${(d.main_prediction||0).toFixed(2)}</div>
+<div class="change" style="color:${clr(mc)}">${mc>0?'+':''}${mc.toFixed(4)}%</div>
+</div>
+</div>
 
-'<div class="card"><h2>📊 Ключевые уровни</h2><div class="grid">'+
-'<div class="met"><div class="mv" style="color:#00e676">$'+(d.support||0).toFixed(2)+'</div><div class="ml">Поддержка</div></div>'+
-'<div class="met"><div class="mv" style="color:#ff5252">$'+(d.resistance||0).toFixed(2)+'</div><div class="ml">Сопротивление</div></div></div></div>'+
+<div class="card">
+<h2>📅 Прогнозы по периодам</h2>
+<div class="forecast-grid">${fc}</div>
+</div>
 
-'<div class="card"><h2>📡 Торговые сигналы</h2>'+sg+'</div>'+
-fg+mt+
-'<div class="disc">⚠️ НЕ финансовый совет. Модель основана на исторических данных и может ошибаться. Рынок непредсказуем.</div>'}
+<div class="card">
+<h2>📈 Путь цены (7 дней)</h2>
+${pp}
+</div>
+
+<div class="card">
+<h2>📊 Ключевые уровни</h2>
+<div class="grid">
+<div class="met"><div class="mv" style="color:#00e676">$${(d.support||0).toFixed(2)}</div><div class="ml">Поддержка</div></div>
+<div class="met"><div class="mv" style="color:#ff5252">$${(d.resistance||0).toFixed(2)}</div><div class="ml">Сопротивление</div></div>
+</div></div>
+
+<div class="card"><h2>📡 Торговые сигналы</h2>${sg}</div>
+${fg}${mt}
+<div class="disc">⚠️ НЕ финансовый совет. Прогнозы основаны на техническом анализе исторических данных. Рынок непредсказуем. Никогда не инвестируйте больше, чем готовы потерять.</div>
+`}
 load()
 </script>
 </body>
