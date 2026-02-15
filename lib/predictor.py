@@ -50,7 +50,7 @@ class XAUTPredictor:
         return slope * n + intercept
 
     def momentum_predict(self, prices):
-        if len(prices) < 5:
+        if len(prices) < 6:
             return prices[-1]
         changes = []
         for i in range(-5, 0):
@@ -119,25 +119,12 @@ class XAUTPredictor:
         return metrics
 
     def run(self):
-        df_ohlc = self.fetcher.get_xaut_ohlc(days=90)
-        data = []
+        data = self.fetcher.get_xaut_ohlc(days=90)
 
-        if df_ohlc is not None and len(df_ohlc) >= 30:
-            for _, row in df_ohlc.iterrows():
-                data.append({
-                    "open": float(row["open"]),
-                    "high": float(row["high"]),
-                    "low": float(row["low"]),
-                    "close": float(row["close"]),
-                })
-        else:
-            df_hist = self.fetcher.get_xaut_history(days=90)
-            if df_hist is not None and len(df_hist) >= 30:
-                for _, row in df_hist.iterrows():
-                    p = float(row["price"])
-                    data.append({"open": p, "high": p, "low": p, "close": p})
+        if data is None or len(data) < 30:
+            data = self.fetcher.get_xaut_history(days=90)
 
-        if len(data) < 30:
+        if data is None or len(data) < 30:
             return {"error": "Недостаточно данных. Попробуйте позже."}
 
         closes = [d["close"] for d in data]
