@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>XAUT Predictor</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;min-height:100vh}
+.c{max-width:880px;margin:0 auto;padding:16px}
+h1{text-align:center;font-size:2em;margin:20px 0;background:linear-gradient(135deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.card{background:#1a1a2e;border-radius:16px;padding:24px;margin:14px 0;border:1px solid #2a2a4a}
+.card h2{color:#ffd700;margin-bottom:14px}
+.pb{font-size:2.8em;font-weight:bold;text-align:center;color:#fff}
+.ch24{text-align:center;margin-top:6px;font-size:1.1em}
+.pbox{text-align:center;padding:20px;border-radius:12px;margin:10px 0}
+.pbox.up{background:rgba(0,200,83,.12);border:1px solid #00c853}
+.pbox.dn{background:rgba(255,23,68,.12);border:1px solid #ff1744}
+.pbox.sd{background:rgba(255,215,0,.12);border:1px solid #ffd700}
+.pp{font-size:2.4em;font-weight:bold}
+.up .pp{color:#00e676}.dn .pp{color:#ff5252}.sd .pp{color:#ffd700}
+.pc{font-size:1.15em;margin-top:6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.met{text-align:center;padding:14px}
+.mv{font-size:1.5em;font-weight:bold;color:#fff}
+.ml{font-size:.82em;color:#888;margin-top:4px}
+.sr{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-radius:8px;margin:5px 0;background:rgba(255,255,255,.03)}
+.badge{padding:3px 12px;border-radius:16px;font-size:.82em;font-weight:bold}
+.badge-BUY{background:rgba(0,200,83,.2);color:#00e676}
+.badge-SELL{background:rgba(255,23,68,.2);color:#ff5252}
+.badge-NEUTRAL{background:rgba(255,215,0,.2);color:#ffd700}
+.rsn{font-size:.8em;color:#888;margin-left:8px}
+.disc{text-align:center;padding:14px;color:#ff9800;font-size:.88em;background:rgba(255,152,0,.08);border-radius:8px;margin-top:18px}
+.btn{display:block;margin:18px auto;padding:12px 36px;font-size:1em;background:linear-gradient(135deg,#ffd700,#ff8c00);color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:bold}
+.btn:hover{opacity:.85}.btn:disabled{opacity:.4;cursor:not-allowed}
+.ld{text-align:center;padding:60px;font-size:1.3em;color:#ffd700}
+.sp{display:inline-block;width:40px;height:40px;border:4px solid #333;border-top-color:#ffd700;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ts{text-align:center;color:#555;font-size:.82em;margin:8px 0}
+@media(max-width:600px){.grid{grid-template-columns:1fr}.pb{font-size:2em}.pp{font-size:1.7em}}
+</style>
+</head>
+<body>
+<div class="c">
+<h1>🥇 XAUT Price Predictor</h1>
+<div id="ct"><div class="ld"><div class="sp"></div><div>Модель анализирует рынок...</div><div style="font-size:.7em;color:#666;margin-top:8px">15-30 секунд</div></div></div>
+<button class="btn" id="rb" onclick="load()">🔄 Обновить прогноз</button>
+</div>
+<script>
+async function load(){
+const b=document.getElementById('rb'),c=document.getElementById('ct');
+b.disabled=true;b.textContent='⏳ Загрузка...';
+c.innerHTML='<div class="ld"><div class="sp"></div><div>Анализ...</div></div>';
+try{const r=await fetch('/api/predict');const d=await r.json();
+if(d.error){c.innerHTML=`<div class="card"><h2>❌ Ошибка</h2><p>${d.error}</p></div>`;return}
+render(d)}catch(e){c.innerHTML=`<div class="card"><h2>❌ Ошибка</h2><p>${e.message}</p></div>`}
+finally{b.disabled=false;b.textContent='🔄 Обновить прогноз'}}
+
+function render(d){
+const ch=d.change_pct||0,cls=ch>.3?'up':ch<-.3?'dn':'sd';
+const cc=ch>0?'#00e676':ch<0?'#ff5252':'#ffd700';
+const c24=d.current_market?.change_24h||0,c24c=c24>0?'#00e676':'#ff5252';
+let sg='';if(d.signals)for(const[n,s]of Object.entries(d.signals)){
+const v=s.value!==undefined?` (${s.value})`:'';
+sg+=`<div class="sr"><span>${n}</span><div><span class="badge badge-${s.signal}">${s.signal}</span><span class="rsn">${s.reason}${v}</span></div></div>`}
+let md='';if(d.predictions)for(const[n,p]of Object.entries(d.predictions))
+md+=`<div class="met"><div class="mv">$${p.toFixed(2)}</div><div class="ml">${n}</div></div>`;
+let fg='';if(d.fear_greed&&d.fear_greed.length){fg='<div class="card"><h2>😱 Fear & Greed</h2>';
+for(const f of d.fear_greed){const fc=f.value>50?'#00e676':'#ff5252';
+fg+=`<div class="sr"><span>${f.date}</span><span style="color:${fc};font-weight:bold">${f.value} — ${f.label}</span></div>`}fg+='</div>'}
+let mt='';if(d.metrics){mt='<div class="card"><h2>📏 Точность</h2>';
+for(const[n,m]of Object.entries(d.metrics))mt+=`<div class="sr"><span>${n}</span><span style="color:#aaa">MAE: $${m.mae}</span></div>`;mt+='</div>'}
+document.getElementById('ct').innerHTML=`
+<p class="ts">Обновлено: ${d.timestamp}</p>
+<div class="card"><h2>💰 Текущая цена XAUT</h2><div class="pb">$${(d.current_price||0).toFixed(2)}</div>
+<div class="ch24" style="color:${c24c}">24ч: ${c24>0?'+':''}${c24.toFixed(2)}%</div></div>
+<div class="card"><h2>🔮 Прогноз</h2><div class="pbox ${cls}">
+<div style="font-size:1.2em">${d.direction}</div>
+<div class="pp">$${(d.ensemble||0).toFixed(2)}</div>
+<div class="pc" style="color:${cc}">${ch>0?'+':''}${ch.toFixed(4)}%</div></div></div>
+<div class="card"><h2>🤖 Модели</h2><div class="grid">${md}</div></div>
+<div class="card"><h2>📊 Уровни</h2><div class="grid">
+<div class="met"><div class="mv" style="color:#00e676">$${(d.support||0).toFixed(2)}</div><div class="ml">Поддержка</div></div>
+<div class="met"><div class="mv" style="color:#ff5252">$${(d.resistance||0).toFixed(2)}</div><div class="ml">Сопротивление</div></div></div></div>
+<div class="card"><h2>📡 Сигналы</h2>${sg}</div>${fg}${mt}
+<div class="disc">⚠️ НЕ финансовый совет. Модель может ошибаться.</div>`}
+load()
+</script>
+</body>
+</html>
