@@ -1,10 +1,6 @@
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error
-import sys, os
+import sys
+import os
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 from data_fetcher import DataFetcher
@@ -15,63 +11,152 @@ class XAUTPredictor:
 
     def __init__(self):
         self.fetcher = DataFetcher()
-        self.scaler = StandardScaler()
-        self.models = {}
-        self.feature_cols = []
 
-    def _get_feature_cols(self, df):
-        exclude = {"target", "open", "high", "low", "close", "price", "volume"}
-        return [c for c in df.columns if c not in exclude and df[c].dtype in [np.float64, np.int64]]
+    def linear_regression(self, x, y):
+        n = len(x)
+        if n < 2:
+            return 0, 0
+        sx = sum(x)
+        sy = sum(y)
+        sxy = sum(a * b for a, b in zip(x, y))
+        sxx = sum(a * a for a in x)
+        denom = n * sxx - sx * sx
+        if denom == 0:
+            return 0, sum(y) / n
+        slope = (n * sxy - sx * sy) / denom
+        intercept = (sy - slope * sx) / n
+        return slope, intercept
 
-    def run(self):
-        df = self.fetcher.get_xaut_ohlc(days=90)
-        if df is None or len(df) < 30:
-            df = self.fetcher.get_xaut_history(days=90)
-        if df is None or len(df) < 30:
-            return {"error": "Недостаточно данных. Попробуйте позже."}
+    def weighted_moving_predict(self, prices, weights=None):
+        n = min(len(prices), 10)
+        recent = prices[-n:]
+        if weights is None:
+            weights = list(range(1, n + 1))
+        total_w = sum(weights[-n:])
+        return sum(p * w for p, w in zip(recent, weights[-n:])) / total_w
 
-        col = "close" if "close" in df.columns else "price"
-        featured = Indicators.calculate_all(df)
-        featured["target"] = featured[col].shift(-1)
-        featured = featured.dropna()
+    def ema_predict(self, prices):
+        ema5 = Indicators.ema(prices, 5)
+        ema10 = Indicators.ema(prices, 10)
+        last_price = prices[-1]
+        trend = ema5[-1] - ema10[-1]
+        return last_price + trend
 
-        if len(featured) < 20:
-            return {"error": "Мало данных после обработки"}
+    def regression_predict(self, prices):
+        n = min(len(prices), 20)
+        recent = prices[-n:]
+        x = list(range(n))
+        slope, intercept = self.linear_regression(x, recent)
+        return slope * n + intercept
 
-        self.feature_cols = self._get_feature_cols(featured)
-        X = featured[self.feature_cols].values
-        y = featured["target"].values
-        X_scaled = self.scaler.fit_transform(X)
+    def momentum_predict(self, prices):
+        if len(prices) < 5:
+            return prices[-1]
+        changes = []
+        for i in range(-5, 0):
+            if prices[i-1] != 0:
+                changes.append((prices[i] - prices[i-1]) / prices[i-1])
+        if not changes:
+            return prices[-1]
+        weights = [1, 1, 2, 2, 3]
+        avg_change = sum(c * w for c, w in zip(changes, weights)) / sum(weights)
+        return prices[-1] * (1 + avg_change)
 
-        split = int(len(X_scaled) * 0.8)
-        X_tr, X_te = X_scaled[:split], X_scaled[split:]
-        y_tr, y_te = y[:split], y[split:]
+    def mean_reversion_predict(self, prices):
+        n = min(len(prices), 20)
+        recent = prices[-n:]
+        mean = sum(recent) / len(recent)
+        last = prices[-1]
+        return last + (mean - last) * 0.15
 
-        self.models = {
-            "gradient_boosting": GradientBoostingRegressor(n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42),
-            "random_forest": RandomForestRegressor(n_estimators=100, max_depth=6, random_state=42),
-            "linear": LinearRegression()
+    def ensemble_predict(self, prices):
+        predictions = {
+            "weighted_ma": self.weighted_moving_predict(prices),
+            "ema_trend": self.ema_predict(prices),
+            "linear_regression": self.regression_predict(prices),
+            "momentum": self.momentum_predict(prices),
+            "mean_reversion": self.mean_reversion_predict(prices),
         }
 
+        weights = {
+            "weighted_ma": 0.20,
+            "ema_trend": 0.25,
+            "linear_regression": 0.25,
+            "momentum": 0.20,
+            "mean_reversion": 0.10,
+        }
+
+        ensemble = sum(predictions[k] * weights[k] for k in predictions)
+        predictions["ensemble"] = round(ensemble, 2)
+
+        for k in predictions:
+            predictions[k] = round(predictions[k], 2)
+
+        return predictions
+
+    def calculate_accuracy(self, prices):
+        if len(prices) < 30:
+            return {}
+
+        errors = {"weighted_ma": [], "ema_trend": [], "linear_regression": [],
+                  "momentum": [], "mean_reversion": [], "ensemble": []}
+
+        for i in range(20, len(prices) - 1):
+            subset = prices[:i]
+            actual = prices[i]
+            preds = self.ensemble_predict(subset)
+
+            for name in errors:
+                if name in preds:
+                    errors[name].append(abs(preds[name] - actual))
+
         metrics = {}
-        for name, model in self.models.items():
-            model.fit(X_tr, y_tr)
-            pred = model.predict(X_te)
-            metrics[name] = {"mae": round(mean_absolute_error(y_te, pred), 2)}
+        for name, errs in errors.items():
+            if errs:
+                mae = sum(errs) / len(errs)
+                metrics[name] = {"mae": round(mae, 2)}
 
-        latest = featured[self.feature_cols].iloc[-1:].values
-        latest_scaled = self.scaler.transform(latest)
+        return metrics
 
-        predictions = {}
-        weights = {"gradient_boosting": 0.5, "random_forest": 0.3, "linear": 0.2}
-        for name, model in self.models.items():
-            predictions[name] = round(model.predict(latest_scaled)[0], 2)
+    def run(self):
+        df_ohlc = self.fetcher.get_xaut_ohlc(days=90)
+        data = []
 
-        ensemble = round(sum(predictions[n] * weights[n] for n in predictions), 2)
+        if df_ohlc is not None and len(df_ohlc) >= 30:
+            for _, row in df_ohlc.iterrows():
+                data.append({
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                })
+        else:
+            df_hist = self.fetcher.get_xaut_history(days=90)
+            if df_hist is not None and len(df_hist) >= 30:
+                for _, row in df_hist.iterrows():
+                    p = float(row["price"])
+                    data.append({"open": p, "high": p, "low": p, "close": p})
 
+        if len(data) < 30:
+            return {"error": "Недостаточно данных. Попробуйте позже."}
+
+        closes = [d["close"] for d in data]
+
+        # Прогнозы
+        predictions = self.ensemble_predict(closes)
+        ensemble = predictions["ensemble"]
+
+        # Точность
+        metrics = self.calculate_accuracy(closes)
+
+        # Текущая цена
         current = self.fetcher.get_current_price()
-        current_price = current["price"] if current else 0
-        change = round(((ensemble - current_price) / current_price) * 100, 4) if current_price > 0 else 0
+        current_price = current["price"] if current else closes[-1]
+
+        # Изменение
+        change = 0
+        if current_price > 0:
+            change = round(((ensemble - current_price) / current_price) * 100, 4)
 
         if change > 0.3:
             direction = "📈 РОСТ"
@@ -80,8 +165,15 @@ class XAUTPredictor:
         else:
             direction = "➡️ БОКОВИК"
 
-        recent = featured[col].tail(30)
-        signals = Indicators.get_signals(featured)
+        # Уровни
+        recent_30 = closes[-30:]
+        support = round(min(recent_30), 2)
+        resistance = round(max(recent_30), 2)
+
+        # Индикаторы и сигналы
+        indicators_data, signals = Indicators.analyze(data)
+
+        # Fear & Greed
         fg = self.fetcher.get_fear_greed()
 
         return {
@@ -91,11 +183,12 @@ class XAUTPredictor:
             "ensemble": ensemble,
             "change_pct": change,
             "direction": direction,
-            "support": round(recent.min(), 2),
-            "resistance": round(recent.max(), 2),
+            "support": support,
+            "resistance": resistance,
+            "indicators": indicators_data,
             "signals": signals,
             "metrics": metrics,
             "fear_greed": fg,
-            "data_points": len(df),
-            "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+            "data_points": len(data),
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
         }

@@ -9,42 +9,53 @@ class DataFetcher:
 
     def get_xaut_ohlc(self, days=90):
         try:
-            import pandas as pd
             resp = requests.get(
                 f"{self.base}/coins/tether-gold/ohlc",
                 params={"vs_currency": "usd", "days": days},
                 timeout=15
             )
             resp.raise_for_status()
-            data = resp.json()
-            df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-            df.set_index("timestamp", inplace=True)
-            return df.sort_index()
+            raw = resp.json()
+
+            if not isinstance(raw, list) or len(raw) < 10:
+                return None
+
+            data = []
+            for row in raw:
+                data.append({
+                    "timestamp": row[0],
+                    "open": row[1],
+                    "high": row[2],
+                    "low": row[3],
+                    "close": row[4]
+                })
+            return data
         except Exception as e:
             print(f"OHLC error: {e}")
             return None
 
     def get_xaut_history(self, days=90):
         try:
-            import pandas as pd
             resp = requests.get(
                 f"{self.base}/coins/tether-gold/market_chart",
                 params={"vs_currency": "usd", "days": days, "interval": "daily"},
                 timeout=15
             )
             resp.raise_for_status()
-            data = resp.json()
-            df = pd.DataFrame(data.get("prices", []), columns=["timestamp", "price"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-            df.set_index("timestamp", inplace=True)
-            volumes = data.get("total_volumes", [])
-            if volumes:
-                vol_df = pd.DataFrame(volumes, columns=["timestamp", "volume"])
-                vol_df["timestamp"] = pd.to_datetime(vol_df["timestamp"], unit="ms")
-                vol_df.set_index("timestamp", inplace=True)
-                df = df.join(vol_df, how="left")
-            return df.sort_index()
+            raw = resp.json()
+            prices = raw.get("prices", [])
+
+            if len(prices) < 10:
+                return None
+
+            data = []
+            for row in prices:
+                p = row[1]
+                data.append({
+                    "timestamp": row[0],
+                    "open": p, "high": p, "low": p, "close": p
+                })
+            return data
         except Exception as e:
             print(f"History error: {e}")
             return None

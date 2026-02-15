@@ -1,157 +1,234 @@
-import numpy as np
-import pandas as pd
+import math
 
 
 class Indicators:
 
     @staticmethod
-    def sma(s, p):
-        return s.rolling(window=p).mean()
-
-    @staticmethod
-    def ema(s, p):
-        return s.ewm(span=p, adjust=False).mean()
-
-    @staticmethod
-    def rsi(s, p=14):
-        d = s.diff()
-        g = d.where(d > 0, 0.0)
-        l = (-d).where(d < 0, 0.0)
-        ag = g.rolling(p).mean()
-        al = l.rolling(p).mean()
-        rs = ag / al.replace(0, np.nan)
-        return 100 - (100 / (1 + rs))
-
-    @staticmethod
-    def macd(s, fast=12, slow=26, sig=9):
-        ef = s.ewm(span=fast, adjust=False).mean()
-        es = s.ewm(span=slow, adjust=False).mean()
-        m = ef - es
-        sl = m.ewm(span=sig, adjust=False).mean()
-        return m, sl, m - sl
-
-    @staticmethod
-    def bollinger(s, p=20, std=2):
-        sma = s.rolling(p).mean()
-        st = s.rolling(p).std()
-        return sma + st * std, sma, sma - st * std
-
-    @staticmethod
-    def stochastic(high, low, close, k=14, d=3):
-        ll = low.rolling(k).min()
-        hh = high.rolling(k).max()
-        k_val = 100 * (close - ll) / (hh - ll)
-        return k_val, k_val.rolling(d).mean()
-
-    @staticmethod
-    def calculate_all(df):
-        r = df.copy()
-        col = "close" if "close" in df.columns else "price"
-        p = r[col]
-
-        r["sma_7"] = Indicators.sma(p, 7)
-        r["sma_14"] = Indicators.sma(p, 14)
-        r["sma_30"] = Indicators.sma(p, 30)
-        r["ema_7"] = Indicators.ema(p, 7)
-        r["ema_14"] = Indicators.ema(p, 14)
-        r["ema_30"] = Indicators.ema(p, 30)
-        r["rsi_14"] = Indicators.rsi(p)
-
-        m, s, h = Indicators.macd(p)
-        r["macd"] = m
-        r["macd_signal"] = s
-        r["macd_hist"] = h
-
-        bu, bm, bl = Indicators.bollinger(p)
-        r["bb_upper"] = bu
-        r["bb_mid"] = bm
-        r["bb_lower"] = bl
-        r["bb_width"] = (bu - bl) / bm
-        r["bb_pos"] = (p - bl) / (bu - bl)
-
-        r["mom_5"] = p - p.shift(5)
-        r["mom_10"] = p - p.shift(10)
-        r["roc_5"] = (p / p.shift(5) - 1) * 100
-        r["roc_10"] = (p / p.shift(10) - 1) * 100
-        r["vol_7"] = p.pct_change().rolling(7).std() * 100
-        r["vol_14"] = p.pct_change().rolling(14).std() * 100
-        r["pct_1"] = p.pct_change(1) * 100
-        r["pct_3"] = p.pct_change(3) * 100
-        r["pct_7"] = p.pct_change(7) * 100
-
-        if all(c in df.columns for c in ["high", "low", "close"]):
-            tr1 = df["high"] - df["low"]
-            tr2 = abs(df["high"] - df["close"].shift(1))
-            tr3 = abs(df["low"] - df["close"].shift(1))
-            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            r["atr_14"] = tr.rolling(14).mean()
-            sk, sd = Indicators.stochastic(df["high"], df["low"], df["close"])
-            r["stoch_k"] = sk
-            r["stoch_d"] = sd
-
-        for lag in [1, 2, 3, 5, 7]:
-            r[f"lag_{lag}"] = p.shift(lag)
-            r[f"pct_lag_{lag}"] = p.pct_change(lag) * 100
-
-        return r
-
-    @staticmethod
-    def get_signals(df):
-        signals = {}
-        latest = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) > 1 else latest
-
-        if "rsi_14" in latest.index and not np.isnan(latest["rsi_14"]):
-            v = latest["rsi_14"]
-            if v < 30:
-                signals["RSI"] = {"signal": "BUY", "value": round(v, 1), "reason": "Перепроданность"}
-            elif v > 70:
-                signals["RSI"] = {"signal": "SELL", "value": round(v, 1), "reason": "Перекупленность"}
+    def sma(prices, period):
+        result = []
+        for i in range(len(prices)):
+            if i < period - 1:
+                result.append(None)
             else:
-                signals["RSI"] = {"signal": "NEUTRAL", "value": round(v, 1), "reason": "Нейтрально"}
+                result.append(sum(prices[i-period+1:i+1]) / period)
+        return result
 
-        if "macd" in latest.index and not np.isnan(latest.get("macd", np.nan)):
-            if latest["macd"] > latest["macd_signal"] and prev["macd"] <= prev["macd_signal"]:
+    @staticmethod
+    def ema(prices, period):
+        result = []
+        k = 2 / (period + 1)
+        for i in range(len(prices)):
+            if i == 0:
+                result.append(prices[0])
+            else:
+                result.append(prices[i] * k + result[-1] * (1 - k))
+        return result
+
+    @staticmethod
+    def rsi(prices, period=14):
+        result = [None] * period
+        for i in range(period, len(prices)):
+            gains, losses = [], []
+            for j in range(i - period + 1, i + 1):
+                diff = prices[j] - prices[j-1]
+                gains.append(diff if diff > 0 else 0)
+                losses.append(-diff if diff < 0 else 0)
+            avg_gain = sum(gains) / period
+            avg_loss = sum(losses) / period
+            if avg_loss == 0:
+                result.append(100)
+            else:
+                rs = avg_gain / avg_loss
+                result.append(100 - (100 / (1 + rs)))
+        return result
+
+    @staticmethod
+    def macd(prices, fast=12, slow=26, sig=9):
+        ema_f = Indicators.ema(prices, fast)
+        ema_s = Indicators.ema(prices, slow)
+        macd_line = [f - s for f, s in zip(ema_f, ema_s)]
+        signal_line = Indicators.ema(macd_line, sig)
+        histogram = [m - s for m, s in zip(macd_line, signal_line)]
+        return macd_line, signal_line, histogram
+
+    @staticmethod
+    def bollinger(prices, period=20, num_std=2):
+        upper, mid, lower = [], [], []
+        for i in range(len(prices)):
+            if i < period - 1:
+                upper.append(None)
+                mid.append(None)
+                lower.append(None)
+            else:
+                window = prices[i-period+1:i+1]
+                m = sum(window) / period
+                variance = sum((x - m) ** 2 for x in window) / period
+                std = math.sqrt(variance)
+                mid.append(m)
+                upper.append(m + std * num_std)
+                lower.append(m - std * num_std)
+        return upper, mid, lower
+
+    @staticmethod
+    def momentum(prices, period=5):
+        result = [None] * period
+        for i in range(period, len(prices)):
+            result.append(prices[i] - prices[i - period])
+        return result
+
+    @staticmethod
+    def roc(prices, period=5):
+        result = [None] * period
+        for i in range(period, len(prices)):
+            if prices[i - period] != 0:
+                result.append(((prices[i] / prices[i - period]) - 1) * 100)
+            else:
+                result.append(0)
+        return result
+
+    @staticmethod
+    def stochastic(highs, lows, closes, k_period=14, d_period=3):
+        k_vals = [None] * (k_period - 1)
+        for i in range(k_period - 1, len(closes)):
+            h = max(highs[i-k_period+1:i+1])
+            l = min(lows[i-k_period+1:i+1])
+            if h - l == 0:
+                k_vals.append(50)
+            else:
+                k_vals.append(100 * (closes[i] - l) / (h - l))
+
+        valid_k = [v for v in k_vals if v is not None]
+        d_vals = [None] * (len(k_vals) - len(valid_k))
+        d_vals += Indicators.sma(valid_k, d_period)
+        return k_vals, d_vals
+
+    @staticmethod
+    def volatility(prices, period=7):
+        result = [None] * period
+        for i in range(period, len(prices)):
+            returns = []
+            for j in range(i - period + 1, i + 1):
+                if prices[j-1] != 0:
+                    returns.append((prices[j] - prices[j-1]) / prices[j-1])
+            if returns:
+                mean_r = sum(returns) / len(returns)
+                var = sum((r - mean_r) ** 2 for r in returns) / len(returns)
+                result.append(math.sqrt(var) * 100)
+            else:
+                result.append(0)
+        return result
+
+    @staticmethod
+    def analyze(data):
+        closes = [d["close"] for d in data]
+        highs = [d.get("high", d["close"]) for d in data]
+        lows = [d.get("low", d["close"]) for d in data]
+
+        n = len(closes)
+        if n < 30:
+            return None, {}
+
+        rsi = Indicators.rsi(closes)
+        macd_line, macd_sig, macd_hist = Indicators.macd(closes)
+        bb_upper, bb_mid, bb_lower = Indicators.bollinger(closes)
+        ema7 = Indicators.ema(closes, 7)
+        ema14 = Indicators.ema(closes, 14)
+        ema30 = Indicators.ema(closes, 30)
+        mom5 = Indicators.momentum(closes, 5)
+        roc5 = Indicators.roc(closes, 5)
+        vol7 = Indicators.volatility(closes, 7)
+        stoch_k, stoch_d = Indicators.stochastic(highs, lows, closes)
+
+        indicators = {
+            "rsi_14": rsi[-1] if rsi[-1] is not None else None,
+            "macd": macd_line[-1],
+            "macd_signal": macd_sig[-1],
+            "macd_hist": macd_hist[-1],
+            "bb_upper": bb_upper[-1],
+            "bb_mid": bb_mid[-1],
+            "bb_lower": bb_lower[-1],
+            "bb_pos": None,
+            "ema_7": ema7[-1],
+            "ema_14": ema14[-1],
+            "ema_30": ema30[-1],
+            "momentum_5": mom5[-1],
+            "roc_5": roc5[-1],
+            "volatility_7": vol7[-1],
+            "stoch_k": stoch_k[-1],
+            "stoch_d": stoch_d[-1] if stoch_d[-1] is not None else None,
+        }
+
+        if bb_upper[-1] is not None and bb_lower[-1] is not None:
+            span = bb_upper[-1] - bb_lower[-1]
+            if span > 0:
+                indicators["bb_pos"] = (closes[-1] - bb_lower[-1]) / span
+
+        return indicators, Indicators.get_signals(indicators, closes, rsi, macd_line, macd_sig)
+
+    @staticmethod
+    def get_signals(ind, closes, rsi_list, macd_list, macd_sig_list):
+        signals = {}
+
+        # RSI
+        rsi = ind.get("rsi_14")
+        if rsi is not None:
+            if rsi < 30:
+                signals["RSI"] = {"signal": "BUY", "value": round(rsi, 1), "reason": "Перепроданность"}
+            elif rsi > 70:
+                signals["RSI"] = {"signal": "SELL", "value": round(rsi, 1), "reason": "Перекупленность"}
+            else:
+                signals["RSI"] = {"signal": "NEUTRAL", "value": round(rsi, 1), "reason": "Нейтрально"}
+
+        # MACD
+        if len(macd_list) >= 2 and len(macd_sig_list) >= 2:
+            if macd_list[-1] > macd_sig_list[-1] and macd_list[-2] <= macd_sig_list[-2]:
                 signals["MACD"] = {"signal": "BUY", "reason": "Бычье пересечение"}
-            elif latest["macd"] < latest["macd_signal"] and prev["macd"] >= prev["macd_signal"]:
+            elif macd_list[-1] < macd_sig_list[-1] and macd_list[-2] >= macd_sig_list[-2]:
                 signals["MACD"] = {"signal": "SELL", "reason": "Медвежье пересечение"}
-            elif latest["macd"] > latest["macd_signal"]:
+            elif macd_list[-1] > macd_sig_list[-1]:
                 signals["MACD"] = {"signal": "BUY", "reason": "Выше сигнальной"}
             else:
                 signals["MACD"] = {"signal": "SELL", "reason": "Ниже сигнальной"}
 
-        if "bb_pos" in latest.index and not np.isnan(latest["bb_pos"]):
-            v = latest["bb_pos"]
-            if v < 0.05:
-                signals["BOLLINGER"] = {"signal": "BUY", "value": round(v, 3), "reason": "У нижней границы"}
-            elif v > 0.95:
-                signals["BOLLINGER"] = {"signal": "SELL", "value": round(v, 3), "reason": "У верхней границы"}
+        # Bollinger
+        bb_pos = ind.get("bb_pos")
+        if bb_pos is not None:
+            if bb_pos < 0.05:
+                signals["BOLLINGER"] = {"signal": "BUY", "value": round(bb_pos, 3), "reason": "У нижней границы"}
+            elif bb_pos > 0.95:
+                signals["BOLLINGER"] = {"signal": "SELL", "value": round(bb_pos, 3), "reason": "У верхней границы"}
             else:
-                signals["BOLLINGER"] = {"signal": "NEUTRAL", "value": round(v, 3), "reason": "Внутри полос"}
+                signals["BOLLINGER"] = {"signal": "NEUTRAL", "value": round(bb_pos, 3), "reason": "Внутри полос"}
 
-        if "ema_7" in latest.index and not np.isnan(latest["ema_7"]):
-            if latest["ema_7"] > latest["ema_30"]:
+        # EMA
+        ema7 = ind.get("ema_7")
+        ema30 = ind.get("ema_30")
+        if ema7 is not None and ema30 is not None:
+            if ema7 > ema30:
                 signals["EMA_TREND"] = {"signal": "BUY", "reason": "EMA7 > EMA30"}
             else:
                 signals["EMA_TREND"] = {"signal": "SELL", "reason": "EMA7 < EMA30"}
 
-        if "mom_5" in latest.index and not np.isnan(latest["mom_5"]):
-            v = latest["mom_5"]
+        # Momentum
+        mom = ind.get("momentum_5")
+        if mom is not None:
             signals["MOMENTUM"] = {
-                "signal": "BUY" if v > 0 else "SELL",
-                "value": round(v, 2),
-                "reason": "Положительный" if v > 0 else "Отрицательный"
+                "signal": "BUY" if mom > 0 else "SELL",
+                "value": round(mom, 2),
+                "reason": "Положительный" if mom > 0 else "Отрицательный"
             }
 
-        if "stoch_k" in latest.index and not np.isnan(latest.get("stoch_k", np.nan)):
-            v = latest["stoch_k"]
-            if v < 20:
-                signals["STOCHASTIC"] = {"signal": "BUY", "value": round(v, 1), "reason": "Перепроданность"}
-            elif v > 80:
-                signals["STOCHASTIC"] = {"signal": "SELL", "value": round(v, 1), "reason": "Перекупленность"}
+        # Stochastic
+        sk = ind.get("stoch_k")
+        if sk is not None:
+            if sk < 20:
+                signals["STOCHASTIC"] = {"signal": "BUY", "value": round(sk, 1), "reason": "Перепроданность"}
+            elif sk > 80:
+                signals["STOCHASTIC"] = {"signal": "SELL", "value": round(sk, 1), "reason": "Перекупленность"}
             else:
-                signals["STOCHASTIC"] = {"signal": "NEUTRAL", "value": round(v, 1), "reason": "Нейтрально"}
+                signals["STOCHASTIC"] = {"signal": "NEUTRAL", "value": round(sk, 1), "reason": "Нейтрально"}
 
+        # Overall
         buy = sum(1 for s in signals.values() if s["signal"] == "BUY")
         sell = sum(1 for s in signals.values() if s["signal"] == "SELL")
         total = len(signals)
